@@ -318,7 +318,7 @@ with sess:
         feed_dict_to_use[is_training_placeholder] = True
 
         gs, _ = sess.run([global_step, train_step], feed_dict=feed_dict_to_use)
-        if gs % 10 == 0:
+        if gs > 0 and gs % 10 == 0:
             _, loss, summary_string = sess.run([global_step, cross_entropy_loss, merged_summary_op], feed_dict=feed_dict_to_use)
             logging.debug("step {0} Current Loss: {1} ".format(gs, loss))
             end = time.time()
@@ -327,11 +327,11 @@ with sess:
 
             summary_string_writer.add_summary(summary_string, i)
 
-            if gs % 100 == 0:
+            if (gs - 1) % 100 == 0:
                 save_path = saver.save(sess, os.path.join(log_folder, "model.ckpt"), global_step=gs)
                 logging.debug("Model saved in file: %s" % save_path)
 
-            if gs % 200 == 0:
+            if (gs - 1) % 200 == 0:
                 eval_folder = os.path.join(FLAGS.output_dir, 'eval')
                 if not os.path.exists(eval_folder):
                     os.makedirs(eval_folder)
