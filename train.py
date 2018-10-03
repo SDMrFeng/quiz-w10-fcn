@@ -52,7 +52,9 @@ image_tensor, orig_img_tensor, annotation_tensor = tf.cond(is_training_placehold
 
 feed_dict_to_use = {is_training_placeholder: True}
 
+# 最后一步反卷积图像尺寸的扩大倍数
 upsample_factor = 8
+# 采用PASCAL VOC数据集，总共有21种分类
 number_of_classes = 21
 
 log_folder = os.path.join(FLAGS.output_dir, 'train')
@@ -71,6 +73,7 @@ with slim.arg_scope(vgg.vgg_arg_scope()):
                                     spatial_squeeze=False,
                                     fc_conv_padding='SAME')
 
+# logits -- 7x7x21
 downsampled_logits_shape = tf.shape(logits)
 
 img_shape = tf.shape(image_tensor)
@@ -84,70 +87,66 @@ upsampled_logits_shape = tf.stack([
                                   downsampled_logits_shape[3]
                                   ])
 
-# 获取vgg16中pool4输出的feature map（在vgg16中pool4输出后将原图缩小为原来的1/16）
+
+# 获取vgg16 pool4的输出， 图像尺寸缩小了16倍 -- 14x14x512
 pool4_feature = end_points['vgg_16/pool4']
-# 对pool4的输出进行1x1xnumber_of_classes(1x1x21)的卷积，不进行激活，并使用0初始化该层卷积核
+# 对pool4的结果进行分类，输出aux_logits_16s为 -- 14x14x21
 with tf.variable_scope('vgg_16/fc8'):
-    pool4_logits_16s = slim.conv2d(pool4_feature, number_of_classes, [1, 1],
-                               activation_fn=None,
-                               weights_initializer=tf.zeros_initializer,
-                               scope='conv_pool4')
+    aux_logits_16s = slim.conv2d(pool4_feature, number_of_classes, [1, 1],
+                                 activation_fn=None,
+                                 weights_initializer=tf.zeros_initializer,
+                                 scope='conv_pool4')
 
-# Perform the upsampling(X2)
-# 将最终的loigts大小由原图1/32变为1/16，以便与pool4的logits合并
-# 反卷积长宽步长为2,即长宽会扩大2倍（倍数由upsample_factor指定）
-upsample_factor = 2
-upsample_filter_np_x2 = bilinear_upsample_weights(upsample_factor, number_of_classes)
+# Perform the upsampling
+# 用双线性插值的方法生成反卷积核，将输出扩大为输入的2倍
+upsample_filter_np_x2 = bilinear_upsample_weights(2,  # upsample_factor,
+                                                  number_of_classes)
+
 upsample_filter_tensor_x2 = tf.Variable(upsample_filter_np_x2, name='vgg_16/fc8/t_conv_x2')
-upsampled_logits_16s = tf.nn.conv2d_transpose(logits, upsample_filter_tensor_x2,
-                                          output_shape=tf.shape(pool4_logits_16s),
-                                          strides=[1, upsample_factor, upsample_factor, 1],
+
+# 将logits的长宽扩大2倍 -- 14x14x21
+upsampled_logits = tf.nn.conv2d_transpose(logits, upsample_filter_tensor_x2,
+                                          output_shape=tf.shape(aux_logits_16s),
+                                          strides=[1, 2, 2, 1],
                                           padding='SAME')
 
-# Combine pool4_logits_16s with upsampled_logits_16s
-upsampled_logits_16s = upsampled_logits_16s + pool4_logits_16s
+# 将其与pool4输出的分类结果融合 -- 14x14x21
+upsampled_logits = upsampled_logits + aux_logits_16s
 
-
-# 获取vgg16中pool3输出的feauture map(在vgg16中pool3输出后将原图缩小为原来的1/8)
+# 获取pool3的输出，28x28x256
 pool3_feature = end_points['vgg_16/pool3']
-# 对pool3的输出进行1x1xnumber_of_classses(1x1x21)的卷积，不进行激活，并使用0初始化该层卷积核
+# 对pool3的输出进行分类，输出aux_pool_logits_8s -- 28x28x21
 with tf.variable_scope('vgg_16/fc8'):
-    pool3_logits_8s = slim.conv2d(pool3_feature, number_of_classes, [1, 1],
-                               activation_fn=None,
-                               weights_initializer=tf.zeros_initializer,
-                               scope='conv_pool3')
+    aux_logits_8s = slim.conv2d(pool3_feature, number_of_classes, [1,1],
+                                activation_fn=None,
+                                weights_initializer=tf.zeros_initializer,
+                                scope='conv_pool3')
 
-# Perform the upsampling(X2)
-# 将上采样后的upsampled_logits_16s由原图1/16变为1/8，以便与pool3的logits合并
-# 反卷积长宽步长为2,即长宽会扩大2倍（倍数由upsample_factor指定）
-upsample_factor = 2
-upsample_filter_np_x2 = bilinear_upsample_weights(upsample_factor, number_of_classes)
-upsample_filter_tensor_x2 = tf.Variable(upsample_filter_np_x2, name='vgg_16/fc8/t_conv_x2_x2')
-upsampled_logits_8s = tf.nn.conv2d_transpose(upsampled_logits_16s, upsample_filter_tensor_x2,
-                                          output_shape=tf.shape(pool3_logits_8s),
-                                          strides=[1, upsample_factor, upsample_factor, 1],
+# 将pool4与logits融合后的输出upsampled_logits进行反卷积，尺寸扩大为原来的2倍， 28x28x21
+upsampled_logits = tf.nn.conv2d_transpose(upsampled_logits, upsample_filter_tensor_x2,
+                                          output_shape=tf.shape(aux_logits_8s),
+                                          strides=[1, 2, 2, 1],
                                           padding='SAME')
+# 与pool3的输出融合 28x28x21
+upsampled_logits = upsampled_logits + aux_logits_8s
 
-# Combine pool3_logits with upsampled_logits
-upsampled_logits = upsampled_logits_8s + pool3_logits_8s
+# 用双线性插值的方法生成反卷积核，将输出扩大为输入的8倍
+upsample_filter_np_x8 = bilinear_upsample_weights(upsample_factor,
+                                                   number_of_classes)
 
-
-# Perform the upsampling(X8)
-# 将上采样后的upsampled_logits由原图1/8变为与原图等大
-# 反卷积长宽步长为8,即长宽会扩大8倍（倍数由upsample_factor指定）
-upsample_factor = 8
-upsample_filter_np_x8 = bilinear_upsample_weights(upsample_factor, number_of_classes)
 upsample_filter_tensor_x8 = tf.Variable(upsample_filter_np_x8, name='vgg_16/fc8/t_conv_x8')
+# 对upsampled_logits进行反卷积操作，输出尺寸为输入图像尺寸
 upsampled_logits = tf.nn.conv2d_transpose(upsampled_logits, upsample_filter_tensor_x8,
                                           output_shape=upsampled_logits_shape,
                                           strides=[1, upsample_factor, upsample_factor, 1],
                                           padding='SAME')
 
-# onehot编码
+
 lbl_onehot = tf.one_hot(annotation_tensor, number_of_classes)
-# 通过上采样的结果与labels计算交叉熵
-cross_entropies = tf.nn.softmax_cross_entropy_with_logits(logits=upsampled_logits, labels=lbl_onehot)
-# 计算平均损失值
+# 采用softmax对logits进行分类，采用交叉熵作为损失函数
+cross_entropies = tf.nn.softmax_cross_entropy_with_logits(logits=upsampled_logits,
+                                                          labels=lbl_onehot)
+
 cross_entropy_loss = tf.reduce_mean(tf.reduce_sum(cross_entropies, axis=-1))
 
 
@@ -358,3 +357,4 @@ with sess:
     logging.debug("Model saved in file: %s" % save_path)
 
 summary_string_writer.close()
+
