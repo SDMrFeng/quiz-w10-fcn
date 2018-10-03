@@ -319,7 +319,7 @@ with sess:
 
         gs, _ = sess.run([global_step, train_step], feed_dict=feed_dict_to_use)
         if gs % 10 == 0:
-            gs, loss, summary_string = sess.run([global_step, cross_entropy_loss, merged_summary_op], feed_dict=feed_dict_to_use)
+            _, loss, summary_string = sess.run([global_step, cross_entropy_loss, merged_summary_op], feed_dict=feed_dict_to_use)
             logging.debug("step {0} Current Loss: {1} ".format(gs, loss))
             end = time.time()
             logging.debug("[{0:.2f}] imgs/s".format(10 * batch_size / (end - start)))
