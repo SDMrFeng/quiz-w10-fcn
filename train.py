@@ -315,23 +315,18 @@ with sess:
 
     start = time.time()
     for i in range(FLAGS.max_steps):
-        feed_dict_to_use[is_training_placeholder] = True     
+        feed_dict_to_use[is_training_placeholder] = True
+
         gs, _ = sess.run([global_step, train_step], feed_dict=feed_dict_to_use)
-        logging.debug("i={0}".format(i))
-        logging.debug("gs={0}".format(gs))   
-        if gs % 10 == 0:          
-            logging.debug("gs10={0}".format(gs))
+        if gs % 10 == 0:
             gs, loss, summary_string = sess.run([global_step, cross_entropy_loss, merged_summary_op], feed_dict=feed_dict_to_use)
-            logging.debug("gs10={0}".format(gs))
             logging.debug("step {0} Current Loss: {1} ".format(gs, loss))
             end = time.time()
             logging.debug("[{0:.2f}] imgs/s".format(10 * batch_size / (end - start)))
             start = end
 
             summary_string_writer.add_summary(summary_string, i)
-            
-            gs = gs - 1
-            logging.debug("after-1  gs10={0}".format(gs))
+
             if gs % 100 == 0:
                 save_path = saver.save(sess, os.path.join(log_folder, "model.ckpt"), global_step=gs)
                 logging.debug("Model saved in file: %s" % save_path)
